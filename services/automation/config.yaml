@@ -1,0 +1,11 @@
+# oapi-codegen config for the Automation service typed client.
+# Regenerate with `make generate` (runs in Docker, no host Go needed).
+package: automation
+output: automation.gen.go
+generate:
+  models: true
+  client: true
+output-options:
+  skip-prune: true
+  # Don't fail the whole build on a few unsupported 3.1 constructs.
+  skip-fmt: false
