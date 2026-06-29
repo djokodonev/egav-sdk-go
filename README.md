@@ -33,11 +33,15 @@ make test
 ## Usage
 
 ```go
-tm, _ := auth.NewCredentialsManager(auth.CredentialsConfig{
-    BaseURL:  "https://authn-api.local.synaptagrid.io:5209",
-    Email:    os.Getenv("EGAV_TEST_EMAIL"),
-    Password: os.Getenv("EGAV_TEST_PASSWORD"),
-    HTTPClient: insecureClient, // local self-signed certs
+// Portal login is the OIDC headless flow (PKCE). ClientID/RedirectURI come
+// from a registered public OIDC client (CP config).
+tm, _ := auth.NewOIDCHeadlessManager(auth.OIDCConfig{
+    AuthNBaseURL: "https://authn-api.local.synaptagrid.io:5209",
+    ClientID:     "public_web_67a894b8cb0e",
+    RedirectURI:  "https://local.synaptagrid.io:3200/callback",
+    Email:        os.Getenv("EGAV_TEST_EMAIL"),
+    Password:     os.Getenv("EGAV_TEST_PASSWORD"),
+    HTTPClient:   insecureClient, // local self-signed certs
 })
 
 c, _ := egavsdk.New(egavsdk.Config{
