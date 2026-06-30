@@ -34,7 +34,7 @@ type Unauthenticated struct {
 	Message string
 }
 
-func (e *Unauthenticated) Error() string  { return e.Message }
+func (e *Unauthenticated) Error() string   { return e.Message }
 func (e *Unauthenticated) HTTPStatus() int { return 401 }
 func (e *Unauthenticated) Kind() string    { return "unauthenticated" }
 
@@ -45,7 +45,7 @@ type PermissionDenied struct {
 	Message        string
 }
 
-func (e *PermissionDenied) Error() string  { return e.Message }
+func (e *PermissionDenied) Error() string   { return e.Message }
 func (e *PermissionDenied) HTTPStatus() int { return 403 }
 func (e *PermissionDenied) ErrorCode() int  { return 4031 }
 func (e *PermissionDenied) Kind() string    { return "permission_denied" }
@@ -58,7 +58,7 @@ type SubscriptionInactive struct {
 	Action  *Action
 }
 
-func (e *SubscriptionInactive) Error() string  { return e.Message }
+func (e *SubscriptionInactive) Error() string   { return e.Message }
 func (e *SubscriptionInactive) HTTPStatus() int { return 402 }
 func (e *SubscriptionInactive) Kind() string    { return "subscription_inactive" }
 
@@ -69,7 +69,7 @@ type FeatureDisabled struct {
 	Message string
 }
 
-func (e *FeatureDisabled) Error() string  { return e.Message }
+func (e *FeatureDisabled) Error() string   { return e.Message }
 func (e *FeatureDisabled) HTTPStatus() int { return 403 }
 func (e *FeatureDisabled) Kind() string    { return "feature_disabled" }
 
@@ -83,7 +83,7 @@ type QuotaExceeded struct {
 	Message string
 }
 
-func (e *QuotaExceeded) Error() string  { return e.Message }
+func (e *QuotaExceeded) Error() string   { return e.Message }
 func (e *QuotaExceeded) HTTPStatus() int { return 429 }
 func (e *QuotaExceeded) Kind() string    { return "quota_exceeded" }
 
@@ -94,7 +94,7 @@ type Unavailable struct {
 	Message string
 }
 
-func (e *Unavailable) Error() string  { return e.Message }
+func (e *Unavailable) Error() string   { return e.Message }
 func (e *Unavailable) HTTPStatus() int { return 503 }
 func (e *Unavailable) Kind() string    { return "unavailable" }
 
