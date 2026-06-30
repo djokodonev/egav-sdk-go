@@ -177,6 +177,73 @@ func (c *Client) Do(ctx context.Context, app, method, path string, body any) (*h
 	return nil, fmt.Errorf("egavsdk: request failed after %d attempts: %w", c.maxRetries+1, lastErr)
 }
 
+// DoRaw issues a JSON request to the named app with explicit per-request
+// headers and WITHOUT injecting the Client's TokenSource. It exists for callers
+// that must control auth per call — e.g. forwarding an end-user bearer to one
+// endpoint while presenting a service x-api-key to another (the access gates).
+// It reuses the same base-URL resolution, retry/backoff and default headers as
+// Do; headers passed here override DefaultHeaders on conflict.
+func (c *Client) DoRaw(ctx context.Context, app, method, path string, body any, headers map[string]string) (*http.Response, error) {
+	base, err := c.baseURL(app)
+	if err != nil {
+		return nil, err
+	}
+	var payload []byte
+	if body != nil {
+		if payload, err = json.Marshal(body); err != nil {
+			return nil, fmt.Errorf("egavsdk: marshal body: %w", err)
+		}
+	}
+	url := base + path
+
+	var lastErr error
+	backoff := 200 * time.Millisecond
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		var rdr io.Reader
+		if payload != nil {
+			rdr = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, url, rdr)
+		if err != nil {
+			return nil, fmt.Errorf("egavsdk: build request: %w", err)
+		}
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.Header.Set("Accept", "application/json")
+		for k, v := range c.headers {
+			req.Header.Set(k, v)
+		}
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
+		resp, err := c.hc.Do(req)
+		switch {
+		case err != nil:
+			lastErr = err // transient (connection/timeout) — retry
+		case resp.StatusCode >= 500:
+			lastErr = fmt.Errorf("egavsdk: server status %d", resp.StatusCode)
+			if attempt == c.maxRetries {
+				return resp, nil // out of retries — let caller Decode into APIError
+			}
+			resp.Body.Close()
+		default:
+			return resp, nil
+		}
+
+		if attempt < c.maxRetries {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+		}
+	}
+	return nil, fmt.Errorf("egavsdk: request failed after %d attempts: %w", c.maxRetries+1, lastErr)
+}
+
 // Get performs a GET and decodes the BaseResponse[T] envelope.
 func Get[T any](ctx context.Context, c *Client, app, path string) (*envelope.BaseResponse[T], error) {
 	resp, err := c.Do(ctx, app, http.MethodGet, path, nil)
