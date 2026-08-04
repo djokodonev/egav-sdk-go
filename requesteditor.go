@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/getek/egav-sdk-go/auth"
+	"github.com/djokodonev/egav-sdk-go/auth"
 )
 
 // BearerEditor returns an oapi-codegen-compatible RequestEditorFn that injects

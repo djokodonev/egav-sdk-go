@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	egavsdk "github.com/getek/egav-sdk-go"
+	egavsdk "github.com/djokodonev/egav-sdk-go"
 )
 
 // newGates wires a Gates onto an SDK Client pointed at a single test server that

@@ -1,4 +1,4 @@
-module github.com/getek/egav-sdk-go
+module github.com/djokodonev/egav-sdk-go
 
 go 1.24.0
 

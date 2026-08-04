@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/getek/egav-sdk-go/auth"
-	"github.com/getek/egav-sdk-go/envelope"
+	"github.com/djokodonev/egav-sdk-go/auth"
+	"github.com/djokodonev/egav-sdk-go/envelope"
 )
 
 type org struct {

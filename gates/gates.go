@@ -27,8 +27,8 @@ import (
 	"net/http"
 	"strings"
 
-	egavsdk "github.com/getek/egav-sdk-go"
-	"github.com/getek/egav-sdk-go/envelope"
+	egavsdk "github.com/djokodonev/egav-sdk-go"
+	"github.com/djokodonev/egav-sdk-go/envelope"
 )
 
 // App codes the gates resolve against the SDK Client's ServiceURLs map.

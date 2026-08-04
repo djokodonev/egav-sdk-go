@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getek/egav-sdk-go/auth"
-	"github.com/getek/egav-sdk-go/envelope"
+	"github.com/djokodonev/egav-sdk-go/auth"
+	"github.com/djokodonev/egav-sdk-go/envelope"
 )
 
 // Config configures a Client.
