@@ -1,0 +1,56 @@
+# Gitleaks configuration -- https://github.com/gitleaks/gitleaks
+#
+# Consumed by .github/workflows/secret-scan.yml, which runs
+#     gitleaks detect --no-git --source .
+# i.e. against the FULL WORKING TREE. The per-push `Secrets` job that some repos
+# run from ci.yml uses gitleaks-action, which only ever sees the pushed commit
+# range -- so anything already committed is invisible to it. That is why four
+# repos carried known credentials through four months of green `Secrets` badges
+# (KAN-522).
+
+title = "gitleaks config"
+
+# Load the upstream default ruleset.
+#
+# Without this -- and with no [[rules]] of our own -- gitleaks loads an EMPTY
+# ruleset, matches nothing, and the scan passes unconditionally (KAN-477).
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Allowlists. Every entry below names a SPECIFIC finding:
+#   targetRules = the one rule that fires,
+#   paths       = the one file it fires in,
+#   regexes     = the one key name / value shape, with condition = "AND" so the
+#                 path alone is never enough to suppress anything.
+#
+# Rule-unscoped blanket paths are deliberately NOT used: such an entry
+# suppresses EVERY rule in the named file, so a real private key or provider
+# token committed there would never be reported. Measured under KAN-521 -- the
+# previous rule-unscoped block was hiding live findings in egav-authn,
+# egav-comments, egav-control-plane, egav-identity and egav-notifications.
+# ---------------------------------------------------------------------------
+
+[[allowlists]]
+description = """
+Committed EXAMPLE / TEMPLATE files and local compose definitions, which carry
+placeholder values rather than credentials.
+
+Scoped to the two rules that actually fire on a placeholder `KEY=value` shape.
+A private key, cloud credential or provider token committed in these same files
+IS still reported -- unlike the previous version of this entry, which carried no
+targetRules and so suppressed every rule in these paths.
+
+`.env.dev` / `.env.stg` / `.env.prod` / `.env.testing` are deliberately NOT in
+this list (KAN-521): they are deployed-environment files, they do not use the
+BUILD_ placeholder convention, and they were measured to contain live values.
+
+Paths are anchored; the previous entries were unanchored substrings.
+"""
+targetRules = ["generic-api-key", "curl-auth-header"]
+paths = [
+  '''(^|/)\.env\.example$''',
+  '''(^|/)\.env\.template$''',
+  '''(^|/)\.env\.defaults$''',
+  '''(^|/)docker-compose[^/]*\.ya?ml$''',
+]
