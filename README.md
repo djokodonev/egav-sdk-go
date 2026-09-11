@@ -20,9 +20,32 @@ Hand-written core (auth + client + envelope), unit-tested. The full per-service
 typed surface is intended to be generated from each service's `/openapi.json`
 with `oapi-codegen` (see *Roadmap*).
 
+## Install
+
+The module is public and tagged; `go get` resolves it through the Go module
+proxy with no `replace` directive and no `GOPRIVATE` setting:
+
+```bash
+go get github.com/djokodonev/egav-sdk-go@v0.1.0
+```
+
+```go
+import (
+	egavsdk "github.com/djokodonev/egav-sdk-go"
+	"github.com/djokodonev/egav-sdk-go/auth"
+	"github.com/djokodonev/egav-sdk-go/envelope"
+	"github.com/djokodonev/egav-sdk-go/gates"
+)
+```
+
+Requires Go 1.24 or newer (`go.mod` declares `go 1.24.0`). Releases are
+annotated `vX.Y.Z` tags on `master`; pin the tag in your `go.mod` rather than
+depending on `@latest`. `egav-sdk-go-example` is the reference consumer and
+builds against the published tag.
+
 ## Build & test (no host Go needed)
 
-Everything runs in the `golang:1.23` Docker image:
+Everything runs in the `golang:1.24` Docker image:
 
 ```bash
 make check      # go vet + go test
