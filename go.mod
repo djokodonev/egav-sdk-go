@@ -4,7 +4,7 @@ go 1.24.0
 
 toolchain go1.24.13
 
-require github.com/oapi-codegen/runtime v1.4.2
+require github.com/oapi-codegen/runtime v1.7.0
 
 require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
