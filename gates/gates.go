@@ -22,8 +22,10 @@ package gates
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -162,11 +164,12 @@ func (g *Gates) RequirePermission(ctx context.Context, id Identity, permissionCo
 	if idx := strings.LastIndex(permissionCode, "."); idx >= 0 {
 		action = permissionCode[idx+1:]
 	}
+	// AuthZ's AuthorizeRequest is NESTED (subject / tenant / action / resource).
 	body := map[string]any{
-		"user_guid":     id.UserGuid,
-		"org_guid":      id.OrgGuid,
-		"action":        action,
-		"resource_type": rt,
+		"subject":  map[string]any{"user_guid": id.UserGuid},
+		"tenant":   map[string]any{"org_guid": id.OrgGuid},
+		"action":   action,
+		"resource": map[string]any{"type": rt},
 	}
 	resp, err := g.client.DoRaw(ctx, appAuthZ, http.MethodPost,
 		"/v1/authz/internal/authorize", body,
@@ -174,23 +177,27 @@ func (g *Gates) RequirePermission(ctx context.Context, id Identity, permissionCo
 	if err != nil {
 		return unavailablef("gates: authz unreachable: %v", err)
 	}
-	type authzDecision struct {
-		Allowed bool `json:"allowed"`
+	defer resp.Body.Close()
+	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if rerr != nil {
+		return unavailablef("gates: authorize read failed: %v", rerr)
 	}
-	// AuthZ returns the decision either bare or inside a BaseResponse data block;
-	// decode into the envelope and fall back to the bare shape.
-	out, derr := envelope.Decode[authzDecision](resp)
-	if derr != nil {
-		var apiErr *envelope.APIError
-		if errors.As(derr, &apiErr) && apiErr.StatusCode >= 500 {
-			return unavailablef("gates: authz error (status %d).", apiErr.StatusCode)
-		}
-		return unavailablef("gates: authorize failed: %v", derr)
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return unavailablef("gates: authz error (status %d).", resp.StatusCode)
 	}
-	if out.Data == nil {
+	// AuthZ's AuthorizeResponse is a BARE object with a top-level `allowed` (a
+	// published SDK contract: it is not wrapped in BaseResponse.data). A pointer
+	// distinguishes "allowed":false from a missing field, which fails closed.
+	var decision struct {
+		Allowed *bool `json:"allowed"`
+	}
+	if err := json.Unmarshal(raw, &decision); err != nil {
+		return unavailablef("gates: authorize failed: unparseable response: %v", err)
+	}
+	if decision.Allowed == nil {
 		return unavailablef("gates: authorize returned no decision.")
 	}
-	if !out.Data.Allowed {
+	if !*decision.Allowed {
 		return &PermissionDenied{
 			PermissionCode: permissionCode,
 			Message:        "Permission denied: " + permissionCode,

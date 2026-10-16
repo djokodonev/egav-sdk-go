@@ -2,11 +2,11 @@ package gates
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	egavsdk "github.com/djokodonev/egav-sdk-go"
@@ -102,59 +102,82 @@ func TestAuthenticate_503_Unavailable(t *testing.T) {
 
 // ---- gate 2: permission -----------------------------------------------------
 
-func TestRequirePermission_Allow(t *testing.T) {
-	var gotKey, gotAuth, gotBody string
+// authzServer captures the request and replies with the given status/body. The
+// real AuthZ returns a BARE JSON object (no BaseResponse wrapper) and requires
+// a NESTED request body.
+func authzServer(t *testing.T, status int, reply string) (*httptest.Server, *map[string]any, *string, *string) {
+	t.Helper()
+	var got map[string]any
+	var gotKey, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotKey = r.Header.Get("x-api-key")
 		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/v1/authz/internal/authorize" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
 		buf, _ := io.ReadAll(r.Body)
-		gotBody = string(buf)
-		_, _ = w.Write([]byte(`{"success":true,"status":"success","data":{"allowed":true}}`))
+		_ = json.Unmarshal(buf, &got)
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(reply))
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
+	return srv, &got, &gotKey, &gotAuth
+}
 
+func nested(t *testing.T, m map[string]any, outer, inner string) any {
+	t.Helper()
+	o, ok := m[outer].(map[string]any)
+	if !ok {
+		t.Fatalf("request body %v has no object %q", m, outer)
+	}
+	return o[inner]
+}
+
+func TestRequirePermission_Allow_NestedRequestBareResponse(t *testing.T) {
+	srv, got, gotKey, gotAuth := authzServer(t, 200, `{"allowed":true,"decision":"allow","reason":"role"}`)
 	g := newGates(t, srv.URL)
 	err := g.RequirePermission(context.Background(), Identity{UserGuid: "u", OrgGuid: "o"}, "project.create")
 	if err != nil {
 		t.Fatalf("expected allow, got %v", err)
 	}
-	if gotKey != "authz-key" {
-		t.Fatalf("x-api-key = %q (app key must be sent to /internal/authorize)", gotKey)
+	if *gotKey != "authz-key" {
+		t.Fatalf("x-api-key = %q (app key must be sent to /internal/authorize)", *gotKey)
 	}
-	if gotAuth != "" {
-		t.Fatalf("user bearer must NOT be sent to /internal/*, got %q", gotAuth)
+	if *gotAuth != "" {
+		t.Fatalf("user bearer must NOT be sent to /internal/*, got %q", *gotAuth)
 	}
-	// action must be the substring after the last dot.
-	if want := `"action":"create"`; !strings.Contains(gotBody, want) {
-		t.Fatalf("body %q missing %q", gotBody, want)
+	if v := nested(t, *got, "subject", "user_guid"); v != "u" {
+		t.Fatalf("subject.user_guid = %v", v)
 	}
-	if want := `"resource_type":"app"`; !strings.Contains(gotBody, want) {
-		t.Fatalf("body %q missing default resource_type %q", gotBody, want)
+	if v := nested(t, *got, "tenant", "org_guid"); v != "o" {
+		t.Fatalf("tenant.org_guid = %v", v)
+	}
+	if (*got)["action"] != "create" { // substring after the last dot
+		t.Fatalf("action = %v", (*got)["action"])
+	}
+	if v := nested(t, *got, "resource", "type"); v != "app" {
+		t.Fatalf("resource.type = %v (default)", v)
+	}
+	for _, flat := range []string{"user_guid", "org_guid", "resource_type"} {
+		if _, ok := (*got)[flat]; ok {
+			t.Fatalf("obsolete flat key %q present in %v", flat, *got)
+		}
 	}
 }
 
 func TestRequirePermission_ResourceTypeOverride(t *testing.T) {
-	var gotBody string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		buf, _ := io.ReadAll(r.Body)
-		gotBody = string(buf)
-		_, _ = w.Write([]byte(`{"success":true,"status":"success","data":{"allowed":true}}`))
-	}))
-	defer srv.Close()
-
+	srv, got, _, _ := authzServer(t, 200, `{"allowed":true,"decision":"allow"}`)
 	g := newGates(t, srv.URL)
-	_ = g.RequirePermission(context.Background(), Identity{UserGuid: "u", OrgGuid: "o"}, "invoice.read", "billing")
-	if want := `"resource_type":"billing"`; !strings.Contains(gotBody, want) {
-		t.Fatalf("body %q missing %q", gotBody, want)
+	if err := g.RequirePermission(context.Background(), Identity{UserGuid: "u", OrgGuid: "o"}, "invoice.read", "billing"); err != nil {
+		t.Fatalf("expected allow, got %v", err)
+	}
+	if v := nested(t, *got, "resource", "type"); v != "billing" {
+		t.Fatalf("resource.type = %v", v)
 	}
 }
 
 func TestRequirePermission_Deny403(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"success":true,"status":"success","data":{"allowed":false}}`))
-	}))
-	defer srv.Close()
-
+	srv, _, _, _ := authzServer(t, 200, `{"allowed":false,"decision":"deny","reason":"no grant"}`)
 	g := newGates(t, srv.URL)
 	err := g.RequirePermission(context.Background(), Identity{UserGuid: "u", OrgGuid: "o"}, "project.create")
 	var pd *PermissionDenied
@@ -169,17 +192,27 @@ func TestRequirePermission_Deny403(t *testing.T) {
 	}
 }
 
-func TestRequirePermission_AuthZDown503(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
-	}))
-	defer srv.Close()
+func TestRequirePermission_MissingAllowedFailsClosed(t *testing.T) {
+	for _, reply := range []string{`{"decision":"allow"}`, `{}`, `{"success":true,"data":{"allowed":true}}`, `not json`, `null`} {
+		srv, _, _, _ := authzServer(t, 200, reply)
+		g := newGates(t, srv.URL)
+		err := g.RequirePermission(context.Background(), Identity{UserGuid: "u", OrgGuid: "o"}, "project.create")
+		var ua *Unavailable
+		if !errors.As(err, &ua) {
+			t.Fatalf("reply %q: expected *Unavailable (fail closed), got %v", reply, err)
+		}
+	}
+}
 
-	g := newGates(t, srv.URL)
-	err := g.RequirePermission(context.Background(), Identity{UserGuid: "u", OrgGuid: "o"}, "project.create")
-	var ua *Unavailable
-	if !errors.As(err, &ua) || ua.HTTPStatus() != 503 {
-		t.Fatalf("expected *Unavailable(503) fail-closed, got %v", err)
+func TestRequirePermission_AuthZDown503(t *testing.T) {
+	for _, status := range []int{500, 503, 401, 422} {
+		srv, _, _, _ := authzServer(t, status, `{"detail":"x"}`)
+		g := newGates(t, srv.URL)
+		err := g.RequirePermission(context.Background(), Identity{UserGuid: "u", OrgGuid: "o"}, "project.create")
+		var ua *Unavailable
+		if !errors.As(err, &ua) || ua.HTTPStatus() != 503 {
+			t.Fatalf("status %d: expected *Unavailable(503) fail-closed, got %v", status, err)
+		}
 	}
 }
 
