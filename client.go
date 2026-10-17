@@ -105,6 +105,28 @@ func (c *Client) baseURL(app string) (string, error) {
 	return u, nil
 }
 
+// retriesFor is how many times a request may be re-sent after a transient failure.
+// KAN-3564: a POST or PATCH that failed in transit may already have taken effect, so
+// re-sending it can apply the change twice. Those methods are retried only when the
+// caller names the operation with an Idempotency-Key header (sent unchanged on every
+// attempt); idempotent methods (RFC 9110: GET, HEAD, OPTIONS, PUT, DELETE) keep the
+// configured retries. A Do call carries no per-call headers, so use DoRaw to supply one.
+func (c *Client) retriesFor(method string, headerSets ...map[string]string) int {
+	switch strings.ToUpper(method) {
+	case http.MethodPost, http.MethodPatch:
+		for _, set := range headerSets {
+			for k, v := range set {
+				if strings.EqualFold(k, "Idempotency-Key") && strings.TrimSpace(v) != "" {
+					return c.maxRetries
+				}
+			}
+		}
+		return 0
+	default:
+		return c.maxRetries
+	}
+}
+
 // Do issues an authenticated JSON request to the named app and returns the raw
 // response for the caller to decode (use Get/Post for typed decoding). It
 // retries transient failures with exponential backoff; 4xx are returned
@@ -121,6 +143,7 @@ func (c *Client) Do(ctx context.Context, app, method, path string, body any) (*h
 		}
 	}
 	url := base + path
+	maxRetries := c.retriesFor(method, c.headers)
 
 	var token string
 	if c.ts != nil {
@@ -131,7 +154,7 @@ func (c *Client) Do(ctx context.Context, app, method, path string, body any) (*h
 
 	var lastErr error
 	backoff := 200 * time.Millisecond
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+	for attempt := 0; attempt <= maxRetries; attempt++ {
 		var rdr io.Reader
 		if payload != nil {
 			rdr = bytes.NewReader(payload)
@@ -157,7 +180,7 @@ func (c *Client) Do(ctx context.Context, app, method, path string, body any) (*h
 			lastErr = err // transient (connection/timeout) — retry
 		case resp.StatusCode >= 500:
 			lastErr = fmt.Errorf("egavsdk: server status %d", resp.StatusCode)
-			if attempt == c.maxRetries {
+			if attempt == maxRetries {
 				return resp, nil // out of retries — let caller Decode into APIError
 			}
 			resp.Body.Close()
@@ -165,7 +188,7 @@ func (c *Client) Do(ctx context.Context, app, method, path string, body any) (*h
 			return resp, nil
 		}
 
-		if attempt < c.maxRetries {
+		if attempt < maxRetries {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -174,7 +197,7 @@ func (c *Client) Do(ctx context.Context, app, method, path string, body any) (*h
 			backoff *= 2
 		}
 	}
-	return nil, fmt.Errorf("egavsdk: request failed after %d attempts: %w", c.maxRetries+1, lastErr)
+	return nil, fmt.Errorf("egavsdk: request failed after %d attempts: %w", maxRetries+1, lastErr)
 }
 
 // DoRaw issues a JSON request to the named app with explicit per-request
@@ -195,10 +218,11 @@ func (c *Client) DoRaw(ctx context.Context, app, method, path string, body any, 
 		}
 	}
 	url := base + path
+	maxRetries := c.retriesFor(method, c.headers, headers)
 
 	var lastErr error
 	backoff := 200 * time.Millisecond
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+	for attempt := 0; attempt <= maxRetries; attempt++ {
 		var rdr io.Reader
 		if payload != nil {
 			rdr = bytes.NewReader(payload)
@@ -224,7 +248,7 @@ func (c *Client) DoRaw(ctx context.Context, app, method, path string, body any, 
 			lastErr = err // transient (connection/timeout) — retry
 		case resp.StatusCode >= 500:
 			lastErr = fmt.Errorf("egavsdk: server status %d", resp.StatusCode)
-			if attempt == c.maxRetries {
+			if attempt == maxRetries {
 				return resp, nil // out of retries — let caller Decode into APIError
 			}
 			resp.Body.Close()
@@ -232,7 +256,7 @@ func (c *Client) DoRaw(ctx context.Context, app, method, path string, body any, 
 			return resp, nil
 		}
 
-		if attempt < c.maxRetries {
+		if attempt < maxRetries {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -241,7 +265,7 @@ func (c *Client) DoRaw(ctx context.Context, app, method, path string, body any, 
 			backoff *= 2
 		}
 	}
-	return nil, fmt.Errorf("egavsdk: request failed after %d attempts: %w", c.maxRetries+1, lastErr)
+	return nil, fmt.Errorf("egavsdk: request failed after %d attempts: %w", maxRetries+1, lastErr)
 }
 
 // Get performs a GET and decodes the BaseResponse[T] envelope.

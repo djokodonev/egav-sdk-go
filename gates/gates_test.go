@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	egavsdk "github.com/djokodonev/egav-sdk-go"
@@ -213,6 +214,28 @@ func TestRequirePermission_AuthZDown503(t *testing.T) {
 		if !errors.As(err, &ua) || ua.HTTPStatus() != 503 {
 			t.Fatalf("status %d: expected *Unavailable(503) fail-closed, got %v", status, err)
 		}
+	}
+}
+
+func TestRequirePermission_RetriesATransientFailureWithTheSameOperationKey(t *testing.T) {
+	// KAN-3564: the authorize POST is a query, so it keeps its retries by naming the operation.
+	var calls int32
+	var keys []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		if atomic.AddInt32(&calls, 1) == 1 {
+			w.WriteHeader(503)
+			return
+		}
+		_, _ = w.Write([]byte(`{"allowed":true}`))
+	}))
+	defer srv.Close()
+	g := newGates(t, srv.URL)
+	if err := g.RequirePermission(context.Background(), Identity{UserGuid: "u", OrgGuid: "o"}, "project.create"); err != nil {
+		t.Fatalf("expected the retry to succeed, got %v", err)
+	}
+	if len(keys) != 2 || keys[0] == "" || keys[0] != keys[1] {
+		t.Fatalf("both attempts must carry one non-empty key, got %v", keys)
 	}
 }
 

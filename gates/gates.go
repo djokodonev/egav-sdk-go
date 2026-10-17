@@ -22,6 +22,8 @@ package gates
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -171,9 +173,11 @@ func (g *Gates) RequirePermission(ctx context.Context, id Identity, permissionCo
 		"action":   action,
 		"resource": map[string]any{"type": rt},
 	}
+	// The authorize call is a pure query, so re-sending it is safe; it names the operation so
+	// the client keeps retrying a POST on transient failures (KAN-3564 / SGR-0030).
 	resp, err := g.client.DoRaw(ctx, appAuthZ, http.MethodPost,
 		"/v1/authz/internal/authorize", body,
-		map[string]string{"x-api-key": g.authzKey})
+		map[string]string{"x-api-key": g.authzKey, "Idempotency-Key": newOperationKey()})
 	if err != nil {
 		return unavailablef("gates: authz unreachable: %v", err)
 	}
@@ -387,4 +391,13 @@ func truthy(v any) bool {
 	default:
 		return true
 	}
+}
+
+// newOperationKey returns a fresh random key naming one logical operation.
+func newOperationKey() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic("gates: no randomness for an operation key: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
